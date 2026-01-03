@@ -1,0 +1,72 @@
+name: Telegram Bot Runner
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Позволяет запускать вручную
+  schedule:
+    # Перезапуск каждые 6 часов (GitHub дает 6 часов на job)
+    - cron: '0 */6 * * *'
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Create .env file
+      run: |
+        echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
+        echo "ADMIN_IDS=${{ secrets.ADMIN_IDS }}" >> .env
+        echo "GROUP_ID=${{ secrets.GROUP_ID }}" >> .env
+        
+    - name: Run Telegram Bot
+      env:
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+        GROUP_ID: ${{ secrets.GROUP_ID }}
+      run: |
+        # Запускаем бота в фоне
+        python main.py &
+        
+        # Сохраняем PID бота
+        echo $! > bot.pid
+        
+        # Ждем инициализации
+        sleep 10
+        
+        # Проверяем, что бот запущен
+        if ps -p $(cat bot.pid) > /dev/null; then
+          echo "✅ Бот успешно запущен с PID: $(cat bot.pid)"
+          
+          # Бесконечный цикл для поддержания job активным
+          while true; do
+            # Проверяем, жив ли бот
+            if ! ps -p $(cat bot.pid) > /dev/null; then
+              echo "❌ Бот умер, перезапускаем..."
+              python main.py &
+              echo $! > bot.pid
+            fi
+            
+            # Логируем статус
+            echo "[$(date)] Бот активен. PID: $(cat bot.pid)"
+            
+            # Ждем 5 минут перед следующей проверкой
+            sleep 300
+          done
+        else
+          echo "❌ Не удалось запустить бота"
+          exit 1
+        fi
